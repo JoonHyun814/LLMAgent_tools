@@ -1,0 +1,4 @@
+langchain_googke_vertexai
+langchain
+python-dotenv
+google-generativeai
