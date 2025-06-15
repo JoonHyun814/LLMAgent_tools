@@ -7,11 +7,10 @@ from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.schema.messages import HumanMessage
 from google.cloud import aiplatform
 import os
-import random
+from datetime import datetime
+import uuid
 import json
 from dotenv import load_dotenv
-
-import google.generativeai as genai
 
 # -------------------------------------
 # 2. GCP 설정
@@ -24,17 +23,17 @@ aiplatform.init(project=os.environ["PROJECT_NAME"], location=os.environ["LOCATIO
 # 3. LangChain 툴 정의
 # -------------------------------------
 @tool
-def get_position(player: str) -> str:
-    """플레이어의 현재 위치를 반환합니다."""
-    return f"{player}의 현재 위치는 {player_db[player]['position']}입니다."
-
-@tool
 def move_player(player: str, location: str) -> str:
     """플레이어를 지정된 위치로 이동시킵니다."""
     if location not in VALID_LOCATIONS:
         return f"'{location}'은(는) 유효한 장소가 아닙니다. 이동 가능한 장소는 {', '.join(VALID_LOCATIONS)}입니다. 정확한 명칭을 입력해 주세요."
-    
     player_db[player]["position"] = location
+    position = player_db[player]["position"]
+    talkable = [p for p in player_db if p != player and player_db[p]["position"] == position]
+    evidences = list(map_dict[position].keys())  # 해당 장소의 증거들
+    player_db[player]["talkable"] = talkable
+    player_db[player]["evidences"] = evidences
+    player_db[player]["conversation_log"].append(f"{location}으로 이동했습니다.")
     return f"{player}이(가) {location}으로 이동했습니다."
 
 
@@ -59,27 +58,8 @@ def talk_to_player(from_player: str, to_player: str) -> str:
     return f"talk_to_player {from_player} {to_player}"
 
 @tool
-def get_available_talk_targets(player: str) -> str:
-    """현재 같은 위치에 있는 다른 플레이어 목록을 보여줍니다."""
-    player_position = player_db[player]['position']
-    others = [
-        name for name, data in player_db.items()
-        if name != player and data['position'] == player_position
-    ]
-    if not others:
-        return f"{player}와 같은 장소에 있는 플레이어가 없습니다."
-    return f"{player}가 대화할 수 있는 대상: {', '.join(others)}"
-
-@tool
-def get_evidence_list(player: str) -> str:
-    """현재 위치에서 볼 수 있는 증거품 목록을 보여줍니다"""
-    player_position = player_db[player]['position']
-    evidence_list = list(map_dict[player_position].keys())
-    return f"{player_position}이 있는 증거품들: {', '.join(evidence_list)}"
-
-@tool
 def get_evidence_info(player: str,evidence: str) -> str:
-    """사용자가 탐색하고 싶은 증거품의 세부내용을 보여줍니다."""
+    """명령을 내린 player가 탐색하고 싶은 evidence의 세부내용을 보여줍니다."""
     player_position = player_db[player]['position']
     evidence_list = list(map_dict[player_position].keys())
     if evidence in evidence_list:
@@ -87,19 +67,13 @@ def get_evidence_info(player: str,evidence: str) -> str:
     else:
         return f"{evidence}가 {', '.join(evidence_list)} 중에 없습니다. 정확한 증거품 명을 입력하세요"
 
-@tool
-def get_conversation_log(player: str) -> str:
-    """해당 플레이어의 대화 기록을 출력합니다."""
-    log = player_db.get(player, {}).get("conversation_log", [])
-    if not log:
-        return f"{player}의 대화 기록이 없습니다."
-    return f"{player}의 대화 기록:\n" + "\n".join(log)
-
 
 if __name__ == "__main__":
     # -------------------------------------
     # 4. 게임 상태 초기화
     # -------------------------------------
+    game_start_time = datetime.today().strftime("%Y%m%d%H%M%S")
+    game_id = f"{game_start_time}_{uuid.uuid4()}"
     turn = 0
     story_name = "story1"
     with open(f"storys/{story_name}/private_story.json") as f:
@@ -119,6 +93,8 @@ if __name__ == "__main__":
     player_db = {
         name: {
             "position": map_list[0],
+            "talkable":player_list,
+            "evidences":list(map_dict[map_list[0]].keys()),
             "conversation_log":[]
         }
         for name in player_list
@@ -128,16 +104,17 @@ if __name__ == "__main__":
     # 5. Game manage Agent 설정
     # -------------------------------------
     llm = ChatVertexAI(model_name="gemini-2.0-flash-001", temperature=0.5)
-    tools = [get_position, move_player, talk_to_player, get_available_talk_targets, get_conversation_log, get_evidence_list, get_evidence_info]
+    tools = [move_player, talk_to_player, get_evidence_info]
     sample_evidence = list(map_dict[map_list[0]].keys())[0]
     prompt = ChatPromptTemplate.from_messages([
         ("system", 
         f""" 너는 턴제 게임의 한국어 도우미야. 사용자의 자연어 입력을 이해해서 '이동', '대화', '대화 가능한 사람 확인' 등을 입력했을 때 적절한 하나의 도구를 찾아서 호출해야 해.
         - '대화'는 같은 위치에 있는 사람에게만 가능해.
         - '누구랑 대화 가능해?' 혹은 '나와 같은 장소에 있는 사람은 누구야?' 라는 식의 질문이 오면, 'get_available_talk_targets'를 사용해.
-        - talk_to_player 를 사용하고 나서는 talk_to_player의 결과가 'talk_to_player {player_list[0]} {player_list[1]}' 과 같은 형식이면 그대로 출력해주고, 아니면 결과 내용에 맞춰서 사용자에게 안내해줘
+        - talk_to_player 를 사용하고 나서는 talk_to_player의 결과가 'talk_to_player {player_list[0]} {player_list[1]}' 과 같은 형식이면 그대로 출력해줘, 앞에 꼭 talk_to_player를 붙여야해, 그게 아니라면 결과 내용에 맞춰서 사용자가 올바른 입력을 하게끔 안내해줘
         - '주변에 뭐가 있는지 보고 싶어' 와같은 탐색 질문을 하면 get_evidence_list를 호출해서 현 위치에서 볼수 있는 증거 리스트를 출력해줘
-        - get_evidence_info 를 사용하고 나서는 get_evidence_info 결과가 'serching---{sample_evidence}---{map_dict[map_list[0]][sample_evidence]}' 과 같은 형식이면 그대로 출력해주고, 아니면 결과 내용에 맞춰서 사용자에게 안내해줘
+        - get_evidence_info 를 사용하고 나서는 get_evidence_info 결과가 'serching---{sample_evidence}---{map_dict[map_list[0]][sample_evidence]}' 과 같은 형식이면 그대로 출력해줘, 반드시 앞에 serching을 붙여야해, 그게 아니라면 결과 내용에 맞춰서 사용자가 올바른 입력을 하게끔 안내해줘
+        - tool 사용시 "{player_list[0]}의 명령: ..." 이란 명령이 들어왔을 때 {player_list[0]} 를 "player" 혹은 "from_player" 로 입력해줘
         """),
         ("human", "{input}"),
         MessagesPlaceholder(variable_name="agent_scratchpad")
@@ -194,9 +171,20 @@ if __name__ == "__main__":
     # -------------------------------------
     # 7. 게임 루프
     # -------------------------------------
+    def game_logging(game_id,message):
+        with open(f"logs/{game_id}.txt","a") as f:
+            f.write(message)
     while True:
         current_player = player_list[turn % len(player_list)]
         print(f"\n{current_player}의 턴입니다.")
+        game_logging(game_id,f"{current_player}의 턴입니다.\n")
+        print(f"""
+    현제 상황
+        위치: {player_db[current_player]["position"]}
+        같은 장소에 있는 사람: {",".join(player_db[current_player]["talkable"])}
+        탐색 가능한 증거품: {",".join(player_db[current_player]["evidences"])}
+        장소 목록: {",".join(map_list)}
+        """)
         if current_player == "매기":
             # 모델에게 한 줄의 액션 요청
             user_input = get_player2_action("매기")
@@ -206,10 +194,11 @@ if __name__ == "__main__":
 
         if user_input.lower() in ["exit", "quit"]:
             break
-
+        game_logging(game_id,f"{user_input}\n")
         result = agent_executor.invoke({
             "input": f"{current_player}의 명령: {user_input}"
         })
+        game_logging(game_id,f"{result}\n")
 
         # 대화 시도(talk_to_player,serching)만 턴을 소모
         if "talk_to_player" in result['output']:
