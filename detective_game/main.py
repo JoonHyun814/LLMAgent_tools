@@ -10,6 +10,7 @@ import os
 from datetime import datetime
 import uuid
 import json
+import time
 from dotenv import load_dotenv
 
 # -------------------------------------
@@ -22,6 +23,12 @@ aiplatform.init(project=os.environ["PROJECT_NAME"], location=os.environ["LOCATIO
 # -------------------------------------
 # 3. LangChain 툴 정의
 # -------------------------------------
+def conversation_logging(player_list,conversation):
+    for player in player_list:
+        player_db[player]["conversation_log"].append(conversation)
+    game_logging(game_id,conversation)
+
+
 @tool
 def move_player(player: str, location: str) -> str:
     """플레이어를 지정된 위치로 이동시킵니다."""
@@ -46,41 +53,27 @@ def talk_to_player(from_player: str, to_player: str) -> str:
     if to_player not in player_db:
         return f"{to_player}는 게임 상 존재하지 않습니다. {', '.join(list(player_db.keys()))}중 정확한 이름을 입력해 주세요"
     
-    if player_db[from_player]['position'] != player_db[to_player]['position']:
-        return f"{to_player}은(는) 같은 장소에 있지 않아 대화할 수 없습니다."
-    
-    player_db[from_player]["conversation_log"].append(f"{to_player}이 {from_player}에게 대화를 걸었습니다.")
-    player_db[to_player]["conversation_log"].append(f"{to_player}이 {from_player}에게 대화를 걸었습니다.")
+    conversation_logging(player_list,f"{to_player}이 {from_player}에게 대화를 걸었습니다.")
     for _ in range(3):
-        player_db[from_player]["conversation_log"].append(f"{to_player}에게 질문하세요")
-        if from_player == "매기":
-            q = get_player2_action("매기")
-            print(q)
-        elif from_player == "톰":
-            q = get_player2_action("톰")
-            print(q)
-        else:
+        # player_db[from_player]["conversation_log"].append(f"{to_player}에게 질문하세요")
+        if from_player == person_player:
             q = input(f"{from_player} 의 질문 :")
-            
-        player_db[from_player]["conversation_log"].append(f"{from_player}: {q}")
-        player_db[to_player]["conversation_log"].append(f"{from_player}: {q}")
-        
-        player_db[to_player]["conversation_log"].append(f"{from_player}에게 답변하세요")
-        if to_player == "매기":
-            a = get_player2_action("매기")
-            print(a)
-        elif to_player == "톰":
-            a = get_player2_action("톰")
-            print(a)
         else:
+            q = get_player2_action(current_player,f"{to_player}에게 질문하세요")
+            print(q)
+        conversation_logging(player_list,f"{from_player}: {q}")
+        
+        # player_db[to_player]["conversation_log"].append(f"{from_player}에게 답변하세요")
+        if to_player == person_player:
             a = input(f"{to_player} 의 답변 :")
-            
-        player_db[from_player]["conversation_log"].append(f"{to_player}: {a}")
-        player_db[to_player]["conversation_log"].append(f"{to_player}: {a}")
-    player_db[from_player]["conversation_log"].append(f"대화가 끝났습니다.")
-    player_db[to_player]["conversation_log"].append(f"대화가 끝났습니다.")
+        else:
+            a = get_player2_action(current_player,f"{from_player}에게 답변하세요")
+            print(a)
+        conversation_logging(player_list,f"{to_player}: {a}")
+        
+    conversation_logging(player_list,f"{to_player}와 {from_player}가 대화를 마쳤습니다.")
     turn += 1
-    return f"{{'turn_used':True,'from_player':'{from_player}','to_player':'{to_player}'}}"
+    return f"{to_player}와 {from_player}가 대화를 마쳤습니다."
 
 @tool
 def get_evidence_info(player: str,evidence: str) -> str:
@@ -91,6 +84,7 @@ def get_evidence_info(player: str,evidence: str) -> str:
     evidence_list = list(map_dict[player_position].keys())
     if evidence in evidence_list:
         turn += 1
+        conversation_logging(player_list,f"{player}이(가) {player_position}에서 {evidence}를 확인했습니다.")
         return f"{{'player':'{player}','evidence':'{evidence}','evidence_info':'{map_dict[player_position][evidence]}'}}"
     else:
         return f"{{'error':'{evidence}가 {', '.join(evidence_list)} 중에 없습니다. 정확한 증거품 명을 입력하세요.'}}"
@@ -155,10 +149,9 @@ if __name__ == "__main__":
     # -------------------------------------
     # 6. Game play Agent 설정
     # -------------------------------------
-    def get_player2_action(player):
+    def get_player2_action(player,next_action):
         """게임 정보 기반으로 LLM에게 한 줄의 액션 요청"""
         position = player_db[player]["position"]
-        talkable = [p for p in player_db if p != player and player_db[p]["position"] == position]
         evidences = list(map_dict[position].keys())  # 해당 장소의 증거들
         conversation = "\n".join(player_db[player]["conversation_log"])
 
@@ -166,9 +159,10 @@ if __name__ == "__main__":
             position=position,
             player = player,
             player_story = player_dict[player],
-            talkable=", ".join(talkable),
             evidences=", ".join(evidences),
-            conversation=conversation
+            player_list=player_list,
+            conversation=conversation,
+            next_action=next_action
         )
         result = game_play_llm.generate([
             [HumanMessage(content=prompt)]
@@ -187,10 +181,12 @@ if __name__ == "__main__":
         character_system_prompt),
         ("human", """다음은 현재게임의 정보입니다:
     - 나의 현재위치: {position}
-    - 같은 장소에 있는 사람들: {talkable}
     - 이 장소에 있는 증거들: {evidences}
+    - 대화 가능한 캐릭터 목록: {player_list}
     - 나의 대화로그:{conversation}
-    한 가지 행동을 선택해서 한 줄의 자연어로 대답해주세요."""),
+    
+    {next_action}
+    """),
     ])
 
     game_play_llm = ChatVertexAI(model_name="gemini-2.0-flash-001", temperature=0.7)
@@ -200,6 +196,17 @@ if __name__ == "__main__":
     # 7. 게임 루프
     # -------------------------------------
     print(game_story_prompt)
+    while True:
+        person_player = input(f"{','.join(player_list)} 중 플레이할 캐릭터를 선택하세요: ")
+        if person_player in player_list:
+            print("다음은 당신만 알고 있는 당신 캐릭터의 설명입니다. 이 내용을 참고하여 범인을 찾고, 범인이시라면 그 사실을 숨기세요.")
+            print(f"<{person_player}에 대한 설명>")
+            print(player_dict[person_player])
+            input("\n\n시작하려면 아무키나 입력하세요: ")
+            break
+        else:
+            print(f"{','.join(player_list)} 중 정확한 캐릭터 이름을 입력하세요")
+    
     def game_logging(game_id,message):
         with open(f"logs/{game_id}.txt","a") as f:
             f.write(message)
@@ -210,35 +217,36 @@ if __name__ == "__main__":
         print(f"""
     현제 상황
         위치: {player_db[current_player]["position"]}
-        같은 장소에 있는 사람: {",".join(player_db[current_player]["talkable"])}
         탐색 가능한 증거품: {",".join(player_db[current_player]["evidences"])}
+        캐릭터 목록: {",".join(player_list)}
         장소 목록: {",".join(map_list)}
         """)
         print(player_db[current_player]["conversation_log"])
-        player_db[current_player]["conversation_log"].append("다음 행동을 선택하세요")
-        if current_player == "매기":
-            # 모델에게 한 줄의 액션 요청
-            user_input = get_player2_action("매기")
-            print(f"🤖 {current_player}(AI)가 선택한 행동: {user_input}")
-        elif current_player == "톰":
-            user_input = get_player2_action("톰")
-            print(f"🤖 {current_player}(AI)가 선택한 행동: {user_input}")
-        else:
+        # player_db[current_player]["conversation_log"].append("다음 행동을 선택하세요")
+        if current_player == person_player:
             user_input = input("행동 입력 (종료는 'exit'): ")
             if user_input == "pass":
                 turn += 1
                 continue
+        else:
+            user_input = get_player2_action(current_player,"다음 행동을 선택하세요")
 
         player_db[current_player]["conversation_log"].append(f"{current_player}의 명령: {user_input}")
         
         if user_input.lower() in ["exit", "quit"]:
+            # conversation_logging(player_list,"가장 의심가는 상대를 선택하시오.")
+            for player in player_list:
+                if player == person_player:
+                    result = input("가장 의심가는 상대를 선택하시오.: ")
+                else:
+                    result = get_player2_action(player,"가장 의심가는 상대를 선택하시오.")
+                print(f"{player}의 답변: {result}")
             break
-        game_logging(game_id,f"{user_input}\n")
+        
+        game_logging(game_id,f"{current_player}의 명령: {user_input}")
         result = agent_executor.invoke({
             "input": f"{current_player}의 명령: {user_input}",
-            "player_list":",".join(player_db[current_player]["talkable"]),
+            "player_list":",".join(player_list),
             "evidence_list":",".join(player_db[current_player]["evidences"])
         })
-        print(result)
-        game_logging(game_id,f"{result}\n")
-        player_db[current_player]["conversation_log"].append(result["output"])
+        game_logging(game_id,f"{result['output']}\n\n")
