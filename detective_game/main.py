@@ -47,7 +47,7 @@ def move_player(player: str, location: str) -> str:
 
 @tool
 def talk_to_player(from_player: str, to_player: str) -> str:
-    """두 플레이어 사이에 대화를 진행 합니다."""
+    """두 플레이어 사이에 대화를 진행 합니다. 명령을 내린 사람이 반드시 from_player가 되어야 합니다."""
     global turn
     print("tool 사용: talk_to_player")
     if to_player not in player_db:
@@ -189,7 +189,7 @@ if __name__ == "__main__":
     """),
     ])
 
-    game_play_llm = ChatVertexAI(model_name="gemini-2.0-flash-001", temperature=0.7)
+    game_play_llm = ChatVertexAI(model_name="gemini-2.0-flash-001", temperature=0.5)
 
 
     # -------------------------------------
