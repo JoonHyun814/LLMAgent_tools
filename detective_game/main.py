@@ -221,7 +221,6 @@ if __name__ == "__main__":
         캐릭터 목록: {",".join(player_list)}
         장소 목록: {",".join(map_list)}
         """)
-        print(player_db[current_player]["conversation_log"])
         # player_db[current_player]["conversation_log"].append("다음 행동을 선택하세요")
         if current_player == person_player:
             user_input = input("행동 입력 (종료는 'exit'): ")
@@ -249,4 +248,5 @@ if __name__ == "__main__":
             "player_list":",".join(player_list),
             "evidence_list":",".join(player_db[current_player]["evidences"])
         })
+        player_db[current_player]["conversation_log"].append(result['output'])
         game_logging(game_id,f"{result['output']}\n\n")
