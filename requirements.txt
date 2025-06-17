@@ -1,4 +1,4 @@
-langchain_googke_vertexai
+langchain_google_vertexai
 langchain
 python-dotenv
 google-generativeai

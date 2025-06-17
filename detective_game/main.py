@@ -59,7 +59,7 @@ def talk_to_player(from_player: str, to_player: str) -> str:
         if from_player == person_player:
             q = input(f"{from_player} 의 질문 :")
         else:
-            q = get_player2_action(current_player,f"{to_player}에게 질문하세요")
+            q = get_player2_action(current_player,f"당신은 {from_player} 입니다. {to_player} 에게 질문하세요")
             print(q)
         conversation_logging(player_list,f"{from_player}: {q}")
         
@@ -67,7 +67,7 @@ def talk_to_player(from_player: str, to_player: str) -> str:
         if to_player == person_player:
             a = input(f"{to_player} 의 답변 :")
         else:
-            a = get_player2_action(current_player,f"{from_player}에게 답변하세요")
+            a = get_player2_action(current_player,f"당신은 {to_player} 입니다. {from_player}의 마지막 질문에 답변하세요")
             print(a)
         conversation_logging(player_list,f"{to_player}: {a}")
         
@@ -179,13 +179,13 @@ if __name__ == "__main__":
     game_play_prompt = ChatPromptTemplate.from_messages([
         ("system", 
         character_system_prompt),
-        ("human", """다음은 현재게임의 정보입니다:
+        ("human", """다음은 현재게임의 정보 및 대화 맥락입니다:
     - 나의 현재위치: {position}
     - 이 장소에 있는 증거들: {evidences}
     - 대화 가능한 캐릭터 목록: {player_list}
-    - 나의 대화로그:{conversation}
+    - 게임 맥락:{conversation}
     
-    {next_action}
+    다음 지시에 따릅니다:{next_action}
     """),
     ])
 
