@@ -155,10 +155,11 @@ if __name__ == "__main__":
         evidences = list(map_dict[position].keys())  # 해당 장소의 증거들
         conversation = "\n".join(player_db[player]["conversation_log"])
 
+        player_story = "\n".join(player_dict[player])
         prompt = game_play_prompt.format(
             position=position,
             player = player,
-            player_story = player_dict[player],
+            player_story = player_story,
             evidences=", ".join(evidences),
             player_list=player_list,
             conversation=conversation,
@@ -201,7 +202,8 @@ if __name__ == "__main__":
         if person_player in player_list:
             print("다음은 당신만 알고 있는 당신 캐릭터의 설명입니다. 이 내용을 참고하여 범인을 찾고, 범인이시라면 그 사실을 숨기세요.")
             print(f"<{person_player}에 대한 설명>")
-            print(player_dict[person_player])
+            player_story = "\n".join(player_dict[person_player])
+            print(player_story)
             input("\n\n시작하려면 아무키나 입력하세요: ")
             break
         else:
