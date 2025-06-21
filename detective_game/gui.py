@@ -38,7 +38,6 @@ def conversation_logging(player_list,conversation, game_id):
 @tool
 def move_player(player: str, location: str, game_id: str) -> str:
     """명령을 내린 플레이어를 지정된 위치로 이동시킵니다."""
-    print("tool 사용: move_player")
     map_dict = game_db[game_id]["map_dict"]
     map_list = list(map_dict.keys())
     player_db = game_db[game_id]["player_db"]
@@ -57,7 +56,6 @@ def move_player(player: str, location: str, game_id: str) -> str:
 @tool
 def talk_to_player(from_player: str, to_player: str, game_id: str) -> str:
     """두 플레이어 사이에 대화를 진행 합니다. 명령을 내린 사람이 반드시 from_player가 되어야 합니다."""
-    print("tool 사용: talk_to_player")
     player_dict = game_db[game_id]["player_dict"]
     player_list = list(player_dict.keys())
     player_db = game_db[game_id]["player_db"]
@@ -84,7 +82,6 @@ def talk_to_player(from_player: str, to_player: str, game_id: str) -> str:
             q = input(f"{from_player} 의 질문 :")
         else:
             q = get_player2_action(from_player,f"당신은 {from_player} 입니다. {to_player} 에게 질문하세요",game_id)
-            print(q)
         game_db[game_id]["log_history"] += f"{from_player}: {q}"
         conversation_logging(player_list,f"{from_player}: {q}",game_id)
         
@@ -93,7 +90,6 @@ def talk_to_player(from_player: str, to_player: str, game_id: str) -> str:
             a = input(f"{to_player} 의 답변 :")
         else:
             a = get_player2_action(to_player,f"당신은 {to_player} 입니다. {from_player}의 마지막 질문에 답변하세요",game_id)
-            print(a)
         game_db[game_id]["log_history"] += f"{to_player}: {a}"
         conversation_logging(player_list,f"{to_player}: {a}",game_id)
         
@@ -104,7 +100,6 @@ def talk_to_player(from_player: str, to_player: str, game_id: str) -> str:
 @tool
 def get_evidence_info(player: str,evidence: str, game_id: str) -> str:
     """명령을 내린 player가 탐색하고 싶은 evidence의 세부내용을 보여줍니다."""
-    print("tool 사용: get_evidence_info")
     player_dict = game_db[game_id]["player_dict"]
     player_list = list(player_dict.keys())
     player_db = game_db[game_id]["player_db"]
@@ -207,7 +202,7 @@ def advance_turn(user_input, game_id, current_player, person_player):
         result = f"(에이전트 응답 예시)"
     else:
         # LLM으로부터 명령 생성
-        user_input = input("LLM input 예시:")
+        user_input = get_player2_action(current_player,"다음 행동을 선택하세요",game_id)
         game_db[game_id]["log_history"] += f"{current_player}의 명령: {user_input}\n"
         result = f"(에이전트 응답 예시)"
         
@@ -215,8 +210,6 @@ def advance_turn(user_input, game_id, current_player, person_player):
         
     next_player = player_list[(game_db[game_id]["turn"]) % len(player_list)]
 
-    print(conversation_trigger.value)
-    print(game_db[game_id]["conversation_db"]["person_conv"])
     if game_db[game_id]["conversation_db"]["person_conv"]:
         from_player = game_db[game_id]["conversation_db"]["from_player"]
         to_player = game_db[game_id]["conversation_db"]["to_player"]
@@ -360,6 +353,21 @@ def conversation_processing(game_id,conv_text,conv_input):
 
     return gr.update(visible=False), gr.update(visible=True), gr.update(value=""), conv_text, game_db[game_id]["log_history"], gr.update()
 
+def ending_game(game_id,player_list):
+    fin_result = ""
+    for player in player_list:
+        if player == person_player:
+            result = input("가장 의심가는 상대를 선택하시오.: ")
+        else:
+            result = get_player2_action(player,"가장 의심가는 상대를 선택하시오.",game_id)
+        fin_result += f"{player}의 답변: {result}"
+    game_db[game_id]["log_history"] += fin_result
+    game_db[game_id].pop("gamemanager_prompt")
+    game_db[game_id].pop("game_play_prompt")
+    with open(f"logs/{game_id}.json","w") as f:
+        json.dump(game_db[game_id], f, indent=4)
+    return game_db[game_id]["log_history"]
+
 with gr.Blocks() as demo:
     game_db = {}
     game_id = gr.State("")
@@ -391,6 +399,8 @@ with gr.Blocks() as demo:
                 conv_input = gr.Textbox(label="대화 입력")
                 conv_button = gr.Button("대화 보내기")
 
+    end_game = gr.Button(value="게임종료")
+
     conversation_trigger.change(
         conversation_start,
         inputs=[game_id,conv_text],
@@ -415,6 +425,11 @@ with gr.Blocks() as demo:
         advance_turn, 
         inputs=[user_input, game_id, current_player, person_player], 
         outputs=[output_box, user_input, current_player, person_player,conversation_trigger]
+    )
+    end_game.click(
+        ending_game,
+        inputs=[game_id,player_list],
+        outputs=[output_box]
     )
 
 demo.launch()
