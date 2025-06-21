@@ -25,14 +25,10 @@ aiplatform.init(project=os.environ["PROJECT_NAME"], location=os.environ["LOCATIO
 # -------------------------------------
 # 3. LangChain 툴 정의
 # -------------------------------------
-def game_logging(game_id,message):
-    with open(f"logs/{game_id}.txt","a") as f:
-        f.write(message)
 def conversation_logging(player_list,conversation, game_id):
     player_db = game_db[game_id]["player_db"]
     for player in player_list:
         player_db[player]["conversation_log"].append(conversation)
-    game_logging(game_id,conversation)
 
 
 @tool
@@ -353,7 +349,7 @@ def conversation_processing(game_id,conv_text,conv_input):
 
     return gr.update(visible=False), gr.update(visible=True), gr.update(value=""), conv_text, game_db[game_id]["log_history"], gr.update()
 
-def ending_game(game_id,player_list):
+def ending_game(game_id,player_list,person_player):
     fin_result = ""
     for player in player_list:
         if player == person_player:
@@ -365,7 +361,7 @@ def ending_game(game_id,player_list):
     game_db[game_id].pop("gamemanager_prompt")
     game_db[game_id].pop("game_play_prompt")
     with open(f"logs/{game_id}.json","w") as f:
-        json.dump(game_db[game_id], f, indent=4)
+        json.dump(game_db[game_id], f, indent=4, ensure_ascii=False)
     return game_db[game_id]["log_history"]
 
 with gr.Blocks() as demo:
@@ -428,7 +424,7 @@ with gr.Blocks() as demo:
     )
     end_game.click(
         ending_game,
-        inputs=[game_id,player_list],
+        inputs=[game_id,player_list,person_player],
         outputs=[output_box]
     )
 
