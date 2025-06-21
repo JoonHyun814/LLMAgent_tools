@@ -58,22 +58,26 @@ def move_player(player: str, location: str, game_id: str) -> str:
 def talk_to_player(from_player: str, to_player: str, game_id: str) -> str:
     """두 플레이어 사이에 대화를 진행 합니다. 명령을 내린 사람이 반드시 from_player가 되어야 합니다."""
     print("tool 사용: talk_to_player")
-    user_input.update(value="test")
-    next_button.update(visible=True)
     player_dict = game_db[game_id]["player_dict"]
     player_list = list(player_dict.keys())
     player_db = game_db[game_id]["player_db"]
     person_player = game_db[game_id]["person_player"]
     
-    if person_player in [from_player, to_player]:
-        game_db[game_id]["conversation_thread_value"] = True
-        game_db[game_id]["conversation_thread"].wait()
-        print("대화창을 열어야 합니다.")
-    
     if to_player not in player_db:
         return f"{to_player}는 게임 상 존재하지 않습니다. {', '.join(list(player_db.keys()))}중 정확한 이름을 입력해 주세요"
     
     conversation_logging(player_list,f"{to_player}이 {from_player}에게 대화를 걸었습니다.",game_id)
+
+    if person_player in [from_player, to_player]:
+        game_db[game_id]["conversation_db"]={
+            "person_conv":True,
+            "person_player":person_player,
+            "from_player":from_player,
+            "to_player":to_player,
+            "turn":0
+        }
+        return f"{to_player}와 {from_player}가 대화를 시작했습니다"
+
     for _ in range(3):
         # player_db[from_player]["conversation_log"].append(f"{to_player}에게 질문하세요")
         if from_player == person_player:
@@ -190,7 +194,7 @@ def select_character(selected, game_id, person_player):
     if current_player == person_player:
         game_db[game_id]["log_history"] + "\n명령을 입력하고 [다음 턴]을 누르세요."
     game_db[game_id]["person_player"] = person_player
-    return game_db[game_id]["log_history"], gr.update(visible=(current_player == person_player)), person_player, gr.update(visible=False), gr.update(visible=False)
+    return game_db[game_id]["log_history"], gr.update(visible=(current_player == person_player)), person_player, gr.update(visible=False), gr.update(visible=False), gr.update(visible=True)
 
 def advance_turn(user_input, game_id, current_player, person_player):
     player_dict = game_db[game_id]["player_dict"]
@@ -210,12 +214,22 @@ def advance_turn(user_input, game_id, current_player, person_player):
     result = invoke_gamemanager_agent(current_player,user_input,player_list,game_id)
         
     next_player = player_list[(game_db[game_id]["turn"]) % len(player_list)]
+
+    print(conversation_trigger.value)
+    print(game_db[game_id]["conversation_db"]["person_conv"])
+    if game_db[game_id]["conversation_db"]["person_conv"]:
+        from_player = game_db[game_id]["conversation_db"]["from_player"]
+        to_player = game_db[game_id]["conversation_db"]["to_player"]
+        game_db[game_id]["log_history"] += f"{to_player}와 {from_player}가 대화를 시작했습니다 '대화창'에서 대화를 시작하세요"
+        conversation_trigger.value += 1
+        return game_db[game_id]["log_history"], gr.update(visible=(next_player == person_player),value=""), current_player, person_player, gr.update(value=conversation_trigger.value)
+
     if person_player == next_player:
         game_db[game_id]["log_history"] + "\n명령을 입력하고 [다음 턴]을 누르세요."
     
     game_db[game_id]["log_history"] += f"결과: {result}\n"
     game_db[game_id]["log_history"] += f"\n[{next_player}의 턴 시작]\n"
-    return game_db[game_id]["log_history"], gr.update(visible=(next_player == person_player),value=""), current_player, person_player
+    return game_db[game_id]["log_history"], gr.update(visible=(next_player == person_player),value=""), current_player, person_player, gr.update()
 
 def game_start(story_name):
     with open(f"storys/{story_name}/private_story.json") as f:
@@ -273,10 +287,78 @@ def game_start(story_name):
     game_db[game_id]["log_history"] = ""
     game_db[game_id]["gamemanager_prompt"] = gamemanager_prompt
     game_db[game_id]["game_play_prompt"] = game_play_prompt
-    game_db[game_id]["conversation_thread"] = threading.Event()
-    game_db[game_id]["conversation_thread_value"] = False
+    game_db[game_id]["conversation_db"]={
+        "person_conv":False,
+        "person_player":None,
+        "from_player":None,
+        "to_player":None,
+        "turn":0
+    }
     
-    return game_id, player_list, game_story_prompt, gr.update(choices=player_list,value=player_list[0])
+    return game_id, player_list, gr.update(value=game_story_prompt,visible=True), gr.update(choices=player_list,value=player_list[0]), gr.update(visible=False), gr.update(visible=True)
+
+def conversation_start(game_id,conv_text):
+    player_dict = game_db[game_id]["player_dict"]
+    player_list = list(player_dict.keys())
+    person_player = game_db[game_id]["conversation_db"]["person_player"]
+    from_player = game_db[game_id]["conversation_db"]["from_player"]
+    to_player = game_db[game_id]["conversation_db"]["to_player"]
+    if person_player == from_player:
+        conv_text = f"{to_player}에게 질문하세요 \n\n"
+    elif person_player != from_player:
+        q = get_player2_action(from_player,f"당신은 {from_player} 입니다. {to_player} 에게 질문하세요",game_id)
+        conv_text = f"{from_player}: {q}"
+        game_db[game_id]["log_history"] += f"{from_player}: {q}"
+        conversation_logging(player_list,f"{from_player}: {q}",game_id)
+    return gr.update(visible=False), gr.update(visible=True), conv_text
+
+def end_converstion(game_id,to_player,from_player):
+    player_dict = game_db[game_id]["player_dict"]
+    player_list = list(player_dict.keys())
+    person_player = game_db[game_id]["conversation_db"]["person_player"]
+    game_db[game_id]["turn"] += 1
+    game_db[game_id]["conversation_db"]["person_conv"] = False
+    next_player = player_list[(game_db[game_id]["turn"]) % len(player_list)]
+
+    game_db[game_id]["log_history"] += f"\n{to_player}와 {from_player}가 대화를 마쳤습니다.\n"
+    game_db[game_id]["log_history"] += f"\n[{next_player}의 턴 시작]\n"
+    conversation_logging(player_list,f"{to_player}와 {from_player}가 대화를 마쳤습니다.",game_id)
+    
+    return gr.update(visible=True), gr.update(visible=False), gr.update(value=""), conv_text, game_db[game_id]["log_history"], gr.update(visible=(next_player == person_player),value="")
+
+def conversation_processing(game_id,conv_text,conv_input):
+    player_dict = game_db[game_id]["player_dict"]
+    player_list = list(player_dict.keys())
+    person_player = game_db[game_id]["conversation_db"]["person_player"]
+    from_player = game_db[game_id]["conversation_db"]["from_player"]
+    to_player = game_db[game_id]["conversation_db"]["to_player"]
+    if from_player == person_player:
+        q = conv_input
+        game_db[game_id]["log_history"] += f"{from_player}: {q}"
+        conv_text += f"{from_player}: {q}"
+        conversation_logging(player_list,f"{from_player}: {q}",game_id)
+        a = get_player2_action(to_player,f"당신은 {to_player} 입니다. {from_player}의 마지막 질문에 답변하세요",game_id)
+        game_db[game_id]["log_history"] += f"{to_player}: {a}"
+        conv_text += f"{to_player}: {a}"
+        conversation_logging(player_list,f"{to_player}: {a}",game_id)
+        game_db[game_id]["conversation_db"]["turn"] += 1
+        if game_db[game_id]["conversation_db"]["turn"] >= 3:
+            return end_converstion(game_id,to_player,from_player)
+        
+    else:
+        a = conv_input
+        game_db[game_id]["log_history"] += f"{to_player}: {a}"
+        conv_text += f"{to_player}: {a}"
+        conversation_logging(player_list,f"{to_player}: {a}",game_id)
+        game_db[game_id]["conversation_db"]["turn"] += 1
+        if game_db[game_id]["conversation_db"]["turn"] >= 3:
+            return end_converstion(game_id,to_player,from_player)
+        q = get_player2_action(from_player,f"당신은 {from_player} 입니다. {to_player} 에게 질문하세요",game_id)
+        game_db[game_id]["log_history"] += f"{from_player}: {q}"
+        conv_text += f"{from_player}: {q}"
+        conversation_logging(player_list,f"{from_player}: {q}",game_id)
+
+    return gr.update(visible=False), gr.update(visible=True), gr.update(value=""), conv_text, game_db[game_id]["log_history"], gr.update()
 
 with gr.Blocks() as demo:
     game_db = {}
@@ -288,33 +370,51 @@ with gr.Blocks() as demo:
     log_history = gr.State("")
     
     gr.Markdown("## Crime Scene")
-    game_story_viewer = gr.Textbox(label ="게임 스토리")
-    story_selector = gr.Dropdown(choices=["story1"], label="스토리 종류 선택")
-    game_start_button = gr.Button("게임 시작")
+    with gr.Row() as story_selector_ui:
+        story_selector = gr.Dropdown(choices=["story1"], label="스토리 종류 선택")
+        game_start_button = gr.Button("게임 시작")
+    game_story_viewer = gr.Textbox(label ="게임 스토리",visible=False)
     
-    
-    with gr.Row():    
+    with gr.Row(visible=False) as char_selector_ui:
         char_selector = gr.Dropdown(choices=player_list.value, label="당신의 캐릭터 선택")
         select_button = gr.Button("선택")
     
-    output_box = gr.Textbox(label="게임 로그", lines=25, interactive=False)
-    user_input = gr.Textbox(label="당신의 명령", visible=False)
-    next_button = gr.Button("다음 턴")
+    with gr.Row(visible=False) as game_processing_ui:
+        output_box = gr.Textbox(label="게임 로그", lines=25, interactive=False)
+        with gr.Column() as user_input_ui:
+            with gr.Column() as turn_processing_ui:
+                user_input = gr.Textbox(label="당신의 명령", visible=False)
+                next_button = gr.Button("다음 턴")
+            conversation_trigger = gr.Number(value=0, visible=False)
+            with gr.Column(visible=False) as conversation_processing_ui:
+                conv_text = gr.Textbox(label="대화 창", lines=25, interactive=False)
+                conv_input = gr.Textbox(label="대화 입력")
+                conv_button = gr.Button("대화 보내기")
 
+    conversation_trigger.change(
+        conversation_start,
+        inputs=[game_id,conv_text],
+        outputs=[turn_processing_ui,conversation_processing_ui,conv_text]
+    )
+    conv_button.click(
+        conversation_processing,
+        inputs=[game_id,conv_text,conv_input],
+        outputs=[turn_processing_ui,conversation_processing_ui, conv_input,conv_text,output_box,user_input]
+    )
     game_start_button.click(
         game_start,
         inputs=[story_selector],
-        outputs=[game_id, player_list, game_story_viewer, char_selector]
+        outputs=[game_id, player_list, game_story_viewer, char_selector, story_selector_ui,char_selector_ui]
     )
     select_button.click(
         select_character, 
         inputs=[char_selector, game_id, person_player], 
-        outputs=[output_box, user_input, person_player, select_button,char_selector]
+        outputs=[output_box, user_input, person_player, select_button,char_selector,game_processing_ui]
     )
     next_button.click(
         advance_turn, 
         inputs=[user_input, game_id, current_player, person_player], 
-        outputs=[output_box, user_input, current_player, person_player]
+        outputs=[output_box, user_input, current_player, person_player,conversation_trigger]
     )
 
 demo.launch()
